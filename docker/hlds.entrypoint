@@ -1,0 +1,10 @@
+#!/usr/bin/env sh
+
+set -eux
+
+# HLDS doesn't use valve_addon and doesn't honor addons_folder=1 in hl.conf.
+# We have to mount additional files separately and copy them inside the base
+# directory.
+cp --verbose --recursive valve_addon/* valve/
+
+exec ./hlds_run "$@"
