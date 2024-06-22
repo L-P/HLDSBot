@@ -4,9 +4,32 @@ import (
 	"context"
 	"fmt"
 	"hldsbot/hlds"
-	"time"
+	"hldsbot/twhl"
+	"os"
+
+	"github.com/rs/zerolog/log"
 )
 
+// /*
+func debug(ctx context.Context, _ *hlds.Pool) error {
+	client, err := twhl.NewClient(os.Getenv("TWHL_API_KEY"))
+	if err != nil {
+		return fmt.Errorf("unable to create TWHL client: %w", err)
+	}
+
+	path, err := client.DownloadVaultItem(ctx, 6910)
+	if err != nil {
+		return fmt.Errorf("unable to download TWHL vault item: %w", err)
+	}
+
+	log.Debug().Str("path", path).Msg("downloaded item")
+
+	return nil
+}
+
+// */
+
+/*
 func debug(ctx context.Context, pool *hlds.Pool) error {
 	cfg, err := hlds.NewServerConfig(
 		1*time.Hour,
@@ -29,3 +52,5 @@ func debug(ctx context.Context, pool *hlds.Pool) error {
 
 	return nil
 }
+
+// */
