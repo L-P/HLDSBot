@@ -87,6 +87,7 @@ type ServerConfig struct {
 	// THIS MEANS SCRIPTS AND BINARIES WILL BE COPIED IF PRESENT.
 	// The contents of this directory MUST be sanitized beforehand.
 	// Can be left empty, no custom content will be loaded.
+	// CONTENTS ON THE HOST WILL BE DELETED WHEN THE SERVER CLOSES
 	valveAddonDirPath string
 
 	lifetime   time.Duration
@@ -102,6 +103,7 @@ type server struct {
 	expiresAt time.Time
 
 	tempFiles []string // files to remove after closing the server
+	addonsDir string
 }
 
 func (s *server) Close() error {
@@ -111,6 +113,13 @@ func (s *server) Close() error {
 		log.Debug().Str("path", path).Msg("removing file")
 		if err := os.Remove(path); err != nil {
 			errs = append(errs, fmt.Errorf("unable to remove temp file '%s': %w", path, err))
+		}
+	}
+
+	if s.addonsDir != "" && strings.HasPrefix(s.addonsDir, UserContentDir) {
+		log.Debug().Str("path", s.addonsDir).Msg("removing dir")
+		if err := os.RemoveAll(s.addonsDir); err != nil {
+			errs = append(errs, fmt.Errorf("unable to remove addons dir: %w", err))
 		}
 	}
 

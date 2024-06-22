@@ -13,8 +13,7 @@ import (
 )
 
 type MapArchive struct {
-	zip *zip.ReadCloser
-
+	zip     *zip.ReadCloser
 	mapping map[string]string // path in zip => path when extracting
 }
 
@@ -40,6 +39,16 @@ func ReadMapArchiveFromFile(path string) (*MapArchive, error) {
 		zip:     zip,
 		mapping: mapping,
 	}, nil
+}
+
+func (ma MapArchive) MapName() string {
+	for _, v := range ma.mapping {
+		if filepath.Dir(v) == "maps" && filepath.Ext(v) == ".bsp" {
+			return strings.TrimSuffix(filepath.Base(v), ".bsp")
+		}
+	}
+
+	panic("unreachable, there should definitely be a map available at this point")
 }
 
 func (ma MapArchive) Extract(dstBaseDir string) (int64, error) {
@@ -101,10 +110,25 @@ func (ma *MapArchive) Close() error {
 func remapZIP(zip *zip.ReadCloser) (map[string]string, error) {
 	var files = make([]string, len(zip.File))
 	for i := range zip.File {
+		if isPathGarbage(zip.File[i].Name) {
+			log.Debug().Str("path", zip.File[i].Name).Msg("skipping garbage")
+			continue
+		}
+
 		files[i] = filepath.Clean(zip.File[i].Name)
 	}
 
 	return remapArchive(files)
+}
+
+func isPathGarbage(path string) bool {
+	switch {
+	case strings.HasPrefix(path, "__MACOSX/"),
+		filepath.Base(path) == ".DS_Store":
+		return true
+	}
+
+	return false
 }
 
 func remapArchive(files []string) (map[string]string, error) {
@@ -130,19 +154,19 @@ func remapArchive(files []string) (map[string]string, error) {
 	// Lone BSP at the root of the archive, no other file is expected to be
 	// usable or in the right path in this ZIP. Bail.
 	if !strings.ContainsRune(bspSrcPath, '/') {
-		log.Info().Str("bsp", bspSrcPath).Msg("found BSP at the archive's root")
+		log.Info().Str("bsp", bspSrcPath).Msg("Found BSP at the archive's root.")
 		return mapping, nil
 	}
 
 	// What? Assume a lone .bsp lost in the zip and bail.
 	mapsDir := filepath.Dir(bspSrcPath)
 	if filepath.Base(mapsDir) != "maps" {
-		log.Warn().Str("bsp", bspSrcPath).Msg("found BSP in a weird path")
+		log.Warn().Str("bsp", bspSrcPath).Msg("Found BSP in a weird path.")
 		return mapping, nil
 	}
 
 	baseDir := filepath.Dir(mapsDir)
-	log.Info().Str("bsp", bspSrcPath).Str("base", baseDir).Msg("found a seemingly proper hierarchy")
+	log.Debug().Str("bsp", bspSrcPath).Str("base", baseDir).Msg("Found a proper hierarchy.")
 
 	return remapArchiveFromBaseDir(files, baseDir)
 }

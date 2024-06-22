@@ -65,7 +65,7 @@ func (client *Client) DownloadVaultItem(ctx context.Context, id int) (string, er
 	}
 
 	item.ContentText, item.ContentHTML = "", "" // cleaner logs
-	log.Info().Interface("item", item).Msg("")
+	log.Debug().Interface("item", item).Msg("")
 
 	if item.EngineID != EngineIDGoldSrc ||
 		item.GameID != GameIDHLDM ||
@@ -74,7 +74,7 @@ func (client *Client) DownloadVaultItem(ctx context.Context, id int) (string, er
 	}
 
 	downloadURL := fmt.Sprintf(downloadURLTemplate, id)
-	log.Info().Int("id", id).Str("url", downloadURL).Msg("Start download.")
+	log.Info().Int("id", id).Str("url", downloadURL).Msg("Downloading archive.")
 	path, err := client.DownloadToFile(ctx, downloadURL)
 	if err != nil {
 		return "", fmt.Errorf("unable to download file: %w", err)

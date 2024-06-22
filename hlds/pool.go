@@ -74,14 +74,14 @@ func (pool *Pool) AddServer(ctx context.Context, cfg ServerConfig) (ServerID, er
 		return zero, fmt.Errorf("unable to create host config: %w", err)
 	}
 
-	log.Info().Str("name", name).Msg("creating container")
+	log.Info().Str("name", name).Msg("Creating container.")
 	res, err := pool.docker.ContainerCreate(ctx, &containerConfig, &hostConfig, nil, nil, name)
 	if err != nil {
 		return zero, fmt.Errorf("unable to create container: %w", err)
 	}
 	id := ServerID(res.ID)
 
-	log.Info().Str("name", name).Str("id", res.ID).Msg("starting container")
+	log.Info().Str("name", name).Str("id", res.ID).Msg("Starting container.")
 	if err := pool.docker.ContainerStart(ctx, res.ID, types.ContainerStartOptions{}); err != nil {
 		pool.forceRemoveContainer(ctx, id)
 		return zero, fmt.Errorf("unable to start container: %w", err)
@@ -102,7 +102,16 @@ func (pool *Pool) AddServer(ctx context.Context, cfg ServerConfig) (ServerID, er
 		startedAt: now,
 		expiresAt: now.Add(cfg.lifetime),
 		tempFiles: tempFiles,
+		addonsDir: cfg.valveAddonDirPath,
 	}
+
+	log.Info().
+		Uint16("port", port).
+		Str("map", cfg.mapCycle[0]).
+		Str("sv_password", cfg.cvars["sv_password"]).
+		Str("rcon_password", cfg.cvars["rcon_password"]).
+		Dur("lifetime", cfg.lifetime).
+		Msg("Server up and running.")
 
 	return ServerID(res.ID), nil
 }
