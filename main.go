@@ -51,6 +51,10 @@ func dispatch(ctx context.Context, pool *hlds.Pool) {
 	var wg sync.WaitGroup
 	wrap(ctx, cancel, pool.Run, &wg)
 
+	if err := debug(ctx, pool); err != nil {
+		log.Fatal().Err(err).Msg("debug")
+	}
+
 	<-ctx.Done()
 
 	log.Info().Err(ctx.Err()).Msg("Shutting down.")
