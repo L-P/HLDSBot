@@ -1,10 +1,10 @@
 package hlds
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"math"
-	"sync"
 
 	docker "github.com/docker/docker/client"
 )
@@ -47,11 +47,9 @@ func (pool *Pool) AddServer(cfg ServerConfig) (ServerID, error) {
 	return ServerID(""), errors.New("not implemented")
 }
 
-func (pool *Pool) Run(wg *sync.WaitGroup, done <-chan struct{}) {
-	wg.Add(1)
+func (pool *Pool) Run(ctx context.Context) error {
+	// TODO health checks, container maintenance, Whatever.
+	<-ctx.Done()
 
-	// TODO health checks, container maintenance, Ghatever.
-
-	<-done
-	wg.Done()
+	return nil
 }
