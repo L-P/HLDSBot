@@ -6,7 +6,8 @@ set -eux
 # We have to mount additional files separately and copy them inside the base
 # directory.
 # Guard against invalid args if the glob doesn't expand.
-if [ -n "$(find valve_addon -maxdepth 0 -type d -empty)" ]; then
+
+if [ -d "/home/steam/hlds/valve_addon/maps" ]; then
     cp --verbose --recursive -- valve_addon/* valve/
 fi
 
