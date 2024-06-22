@@ -50,10 +50,7 @@ func dispatch(ctx context.Context, pool *hlds.Pool) {
 
 	var wg sync.WaitGroup
 	wrap(ctx, cancel, pool.Run, &wg)
-
-	if err := debug(ctx, pool); err != nil {
-		log.Fatal().Err(err).Msg("debug")
-	}
+	wrap(ctx, cancel, func(ctx context.Context) error { return debug(ctx, pool) }, &wg)
 
 	<-ctx.Done()
 

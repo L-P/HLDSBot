@@ -4,19 +4,43 @@ import (
 	"context"
 	"fmt"
 	"hldsbot/hlds"
-	"hldsbot/twhl"
 	"os"
-
-	"github.com/rs/zerolog/log"
 )
 
 // /*
 func debug(ctx context.Context, _ *hlds.Pool) error {
-	client, err := twhl.NewClient(os.Getenv("TWHL_API_KEY"))
+	path := "/tmp/725199372.download"
+	archive, err := hlds.ReadMapArchiveFromFile(path)
 	if err != nil {
-		return fmt.Errorf("unable to create TWHL client: %w", err)
+		return fmt.Errorf("unable to read map archive: %w", err)
 	}
 
+	if _, err := os.Stat(hlds.UserContentDir); os.IsNotExist(err) {
+		if err := os.MkdirAll(hlds.UserContentDir, 0o755); err != nil {
+			return fmt.Errorf("unable to create dir '%s': %w", hlds.UserContentDir, err)
+		}
+	}
+	dstDir, err := os.MkdirTemp(hlds.UserContentDir, "")
+	if err != nil {
+		return fmt.Errorf("unable to create temp dir: %w", err)
+	}
+
+	if _, err := archive.Extract(dstDir); err != nil {
+		return fmt.Errorf("unable to extract archive: %w", err)
+	}
+
+	if err := archive.Close(); err != nil {
+		return fmt.Errorf("unable to close map archive: %w", err)
+	}
+
+	return nil
+}
+
+// */
+
+/*
+func debug(ctx context.Context, _ *hlds.Pool) error {
+	client := twhl.NewClient()
 	path, err := client.DownloadVaultItem(ctx, 6910)
 	if err != nil {
 		return fmt.Errorf("unable to download TWHL vault item: %w", err)
@@ -26,7 +50,6 @@ func debug(ctx context.Context, _ *hlds.Pool) error {
 
 	return nil
 }
-
 // */
 
 /*

@@ -31,18 +31,11 @@ const (
 )
 
 type Client struct {
-	apiKey string
-	http   http.Client
+	http http.Client
 }
 
-func NewClient(apiKey string) (*Client, error) {
-	if apiKey == "" {
-		return nil, errors.New("apiKey cannot be empty")
-	}
-
-	return &Client{
-		apiKey: apiKey,
-	}, nil
+func NewClient() *Client {
+	return &Client{}
 }
 
 func apiURL(path string, kvs map[string]string) (string, error) {
