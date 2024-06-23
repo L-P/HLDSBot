@@ -9,18 +9,19 @@ import (
 
 // /*
 func debug(ctx context.Context, pool *hlds.Pool) error {
-	addonsDir, mapName, err := fetchAndExtractVaultMap(ctx, 6847)
-	// 6910
-	//
-	if err != nil {
-		return fmt.Errorf("unable to fetch and extract vault item: %w", err)
-	}
+	/*
+		addonsDir, mapName, err := fetchAndExtractVaultMap(ctx, 6847)
+		// 6910
+		if err != nil {
+			return fmt.Errorf("unable to fetch and extract vault item: %w", err)
+		}
+	*/
 
 	cfg, err := hlds.NewServerConfig(
 		1*time.Hour,
-		addonsDir,
+		"", /* addonsDir */
 		2,
-		[]string{mapName},
+		[]string{"crossfire" /*mapName*/},
 		map[string]string{
 			"rcon_password": generatePassword(32),
 			"sv_password":   generatePassword(8),

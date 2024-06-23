@@ -10,6 +10,7 @@ import (
 
 	"github.com/docker/docker/api/types"
 	docker "github.com/docker/docker/client"
+	"github.com/docker/docker/errdefs"
 	"github.com/rs/zerolog/log"
 )
 
@@ -100,6 +101,7 @@ func (pool *Pool) AddServer(ctx context.Context, cfg ServerConfig) (ServerID, er
 		id:        id,
 		name:      name,
 		startedAt: now,
+		port:      port,
 		expiresAt: now.Add(cfg.lifetime),
 		tempFiles: tempFiles,
 		addonsDir: cfg.valveAddonDirPath,
@@ -120,12 +122,25 @@ func (pool *Pool) RemoveServer(ctx context.Context, id ServerID) error {
 	server := pool.servers[id]
 	log.Info().Str("id", id.String()).Str("name", server.name).Msg("removing server")
 
-	pool.forceRemoveContainer(ctx, server.id)
+	running, err := pool.IsServerRunning(ctx, id)
+	if err != nil {
+		if !isDockerErrNotFound(err) {
+			running = true
+			log.Error().Str("id", id.String()).Err(err).Msg("unable to fetch server status, forcing remove")
+		}
+	}
+
+	if running {
+		pool.forceRemoveContainer(ctx, server.id)
+	}
+
+	defer delete(pool.servers, id)
+
+	pool.FreePort(server.port)
+
 	if err := server.Close(); err != nil {
 		return fmt.Errorf("unable to close server: %w", err)
 	}
-
-	delete(pool.servers, id)
 
 	return nil
 }
@@ -148,6 +163,7 @@ func (pool *Pool) AllocPort() (uint16, error) {
 			continue
 		}
 
+		log.Debug().Uint16("port", v.port).Msg("Allocating port.")
 		pool.ports[i].inUse = true
 		return v.port, nil
 	}
@@ -164,6 +180,7 @@ func (pool *Pool) FreePort(port uint16) {
 			continue
 		}
 
+		log.Debug().Uint16("port", v.port).Msg("Freeing port.")
 		pool.ports[i].inUse = false
 		return
 	}
@@ -175,14 +192,22 @@ func (pool *Pool) Run(ctx context.Context) error {
 loop:
 	for {
 		select {
+		// Bail if we cannot remove servers, we're probably in a inconsistent
+		// state or Docker is.
 		case <-timer.C:
 			if err := pool.removeExpiredServers(ctx); err != nil {
 				return fmt.Errorf("unable to remove expired servers: %w", err)
+			}
+			if err := pool.removeStoppedServers(ctx); err != nil {
+				return fmt.Errorf("unable to remove stopped servers: %w", err)
 			}
 		case <-ctx.Done():
 			break loop
 		}
 	}
+
+	// TODO HTTP(TLS via reverse_proxy Caddy)
+	// TODO discord bot
 
 	// The context being already cancelled, we need a "new" one to allow Docker
 	// to do its stuff.
@@ -215,4 +240,57 @@ func (pool *Pool) close(ctx context.Context) error {
 	}
 
 	return errors.Join(errs...)
+}
+
+func (pool *Pool) removeStoppedServers(ctx context.Context) error {
+	var errs []error
+
+	for _, v := range pool.servers {
+		ok, err := pool.IsServerRunning(ctx, v.id)
+		if isDockerErrNotFound(err) {
+			log.Warn().
+				Str("id", v.id.String()).
+				Msg("missing container, removing server from pool")
+		} else if err != nil {
+			errs = append(errs, fmt.Errorf("unable to fetch server status: %w", err))
+			continue
+		} else if ok {
+			continue
+		}
+
+		if err := pool.RemoveServer(ctx, v.id); err != nil {
+			errs = append(errs, fmt.Errorf("unable to remove expired server: %w", err))
+		}
+	}
+
+	return errors.Join(errs...)
+}
+
+func (pool *Pool) IsServerRunning(ctx context.Context, id ServerID) (bool, error) {
+	res, err := pool.docker.ContainerInspect(ctx, id.String())
+	if err != nil {
+		return false, fmt.Errorf("unable to fetch container state for server %s: %w", id, err)
+	}
+
+	if res.State == nil {
+		return false, errors.New("no State in inspect response")
+	}
+
+	return res.State.Running, nil
+}
+
+// Unwrapping wrapper around errdefs.IsNotFound that won't work with wrapped
+// errs.
+func isDockerErrNotFound(err error) bool {
+	for {
+		if err == nil {
+			return false
+		}
+
+		if errdefs.IsNotFound(err) {
+			return true
+		}
+
+		err = errors.Unwrap(err)
+	}
 }

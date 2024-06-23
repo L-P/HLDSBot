@@ -99,6 +99,7 @@ type ServerConfig struct {
 type server struct {
 	id        ServerID
 	name      string
+	port      uint16
 	startedAt time.Time
 	expiresAt time.Time
 
