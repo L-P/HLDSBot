@@ -23,7 +23,9 @@ const (
 	// To ensure this API cannot be misused and mount arbitrary directories, only
 	// directories created under UserContentDir will be allowed to be mounted in
 	// hlds containers.
-	UserContentDir  = "/var/tmp/hlds"
+	// THIS DIRECTORY WILL BE HTTP-SERVED TO THE INTERNET for fastdl.
+	UserContentDir = "/var/tmp/hlds"
+
 	HLDSDockerImage = "hlds:latest"
 )
 

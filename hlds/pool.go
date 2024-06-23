@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math"
 	"net"
+	"strings"
 	"sync"
 	"time"
 
@@ -21,9 +22,10 @@ type Pool struct {
 	maxServers int
 	servers    map[ServerID]Server
 
-	externalIP net.IP
-	portsMutex sync.Mutex
-	ports      []portAlloc // true = in use, false = free
+	baseDownloadURL string
+	externalIP      net.IP
+	portsMutex      sync.Mutex
+	ports           []portAlloc // true = in use, false = free
 }
 
 type portAlloc struct {
@@ -35,6 +37,7 @@ func NewPool(
 	dockerClient *docker.Client,
 	maxServers int,
 	minPort uint16,
+	baseDownloadURL string,
 ) (*Pool, error) {
 	// Let the OS throw when a bad port is bound, only do basic checks.
 	if maxServers < 1 || maxServers >= math.MaxUint16 {
@@ -51,11 +54,12 @@ func NewPool(
 	}
 
 	return &Pool{
-		docker:     dockerClient,
-		maxServers: maxServers,
-		servers:    make(map[ServerID]Server, maxServers),
-		ports:      makePorts(minPort, maxServers),
-		externalIP: externalIP,
+		docker:          dockerClient,
+		maxServers:      maxServers,
+		servers:         make(map[ServerID]Server, maxServers),
+		ports:           makePorts(minPort, maxServers),
+		externalIP:      externalIP,
+		baseDownloadURL: baseDownloadURL,
 	}, nil
 }
 
@@ -75,11 +79,21 @@ func (pool *Pool) AddServer(ctx context.Context, cfg ServerConfig) (
 ) {
 	var zero Server
 
+	// Let this be the first thing we do to ensure we have space to allocate a
+	// server and bail early if we don't. It's also blocking/concurrent-safe
+	// and will ensure another call won't race us for resources.
 	port, err := pool.AllocPort()
 	if err != nil {
 		return zero, fmt.Errorf("unable to allocate port: %w", err)
 	}
 	name := fmt.Sprintf("hlds_%d", port)
+
+	// HACK, I don't like writing over the config here but I have no better
+	// place to do it.
+	cfg.cvars["sv_downloadurl"] = pool.baseDownloadURL + strings.TrimPrefix(cfg.valveAddonDirPath, UserContentDir)
+	cfg.cvars["sv_allowdownload"] = "1"
+	cfg.cvars["sv_allowupload"] = "1"
+	log.Debug().Str("sv_downloadurl", cfg.cvars["sv_downloadurl"]).Msg("")
 
 	containerConfig := cfg.ContainerConfig(port)
 	hostConfig, tempFiles, err := cfg.HostConfig()

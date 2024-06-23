@@ -32,7 +32,11 @@ func main() {
 		}
 	}()
 
-	pool, err := hlds.NewPool(dockerClient, 2, 27015)
+	pool, err := hlds.NewPool(
+		dockerClient, 2, 27015,
+		os.Getenv("HLDSBOT_BASE_DOWNLOAD_URL"),
+	)
+
 	if err != nil {
 		log.Fatal().Err(err).Msg("unable to init hlds.Pool")
 	}
