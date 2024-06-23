@@ -12,4 +12,6 @@ RUN chmod +x /usr/bin/hlds.entrypoint
 
 USER steam
 WORKDIR /home/steam/hlds
+COPY server.cfg instance.cfg listip.cfg banned.cfg /home/steam/hlds/valve/
+
 ENTRYPOINT ["/usr/bin/hlds.entrypoint"]

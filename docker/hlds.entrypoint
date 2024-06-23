@@ -5,6 +5,10 @@ set -eux
 # HLDS doesn't use valve_addon and doesn't honor addons_folder=1 in hl.conf.
 # We have to mount additional files separately and copy them inside the base
 # directory.
-cp --verbose --recursive valve_addon/* valve/
+# Guard against invalid args if the glob doesn't expand.
+
+if [ -d "/home/steam/hlds/valve_addon/maps" ]; then
+    cp --verbose --recursive -- valve_addon/* valve/
+fi
 
 exec ./hlds_run "$@"
