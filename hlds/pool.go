@@ -5,20 +5,23 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"net"
 	"sync"
 	"time"
 
 	"github.com/docker/docker/api/types"
 	docker "github.com/docker/docker/client"
 	"github.com/docker/docker/errdefs"
+	"github.com/jackpal/gateway"
 	"github.com/rs/zerolog/log"
 )
 
 type Pool struct {
 	docker     *docker.Client
 	maxServers int
-	servers    map[ServerID]server
+	servers    map[ServerID]Server
 
+	externalIP net.IP
 	portsMutex sync.Mutex
 	ports      []portAlloc // true = in use, false = free
 }
@@ -42,11 +45,17 @@ func NewPool(
 		return nil, errors.New("port overflow, minPort+maxServers > maxPort")
 	}
 
+	externalIP, err := gateway.DiscoverInterface()
+	if err != nil {
+		return nil, fmt.Errorf("unable to detect default interface IP: %w", err)
+	}
+
 	return &Pool{
 		docker:     dockerClient,
 		maxServers: maxServers,
-		servers:    make(map[ServerID]server, maxServers),
+		servers:    make(map[ServerID]Server, maxServers),
 		ports:      makePorts(minPort, maxServers),
+		externalIP: externalIP,
 	}, nil
 }
 
@@ -60,8 +69,11 @@ func makePorts(minPort uint16, maxServers int) []portAlloc {
 	return ret
 }
 
-func (pool *Pool) AddServer(ctx context.Context, cfg ServerConfig) (ServerID, error) {
-	var zero ServerID
+func (pool *Pool) AddServer(ctx context.Context, cfg ServerConfig) (
+	Server,
+	error,
+) {
+	var zero Server
 
 	port, err := pool.AllocPort()
 	if err != nil {
@@ -97,10 +109,12 @@ func (pool *Pool) AddServer(ctx context.Context, cfg ServerConfig) (ServerID, er
 		return zero, fmt.Errorf("duplicate server id: %s", id)
 	}
 
-	pool.servers[id] = server{
+	pool.servers[id] = Server{
 		id:        id,
+		cfg:       cfg,
 		name:      name,
 		startedAt: now,
+		hostIP:    pool.externalIP,
 		port:      port,
 		expiresAt: now.Add(cfg.lifetime),
 		tempFiles: tempFiles,
@@ -115,7 +129,7 @@ func (pool *Pool) AddServer(ctx context.Context, cfg ServerConfig) (ServerID, er
 		Dur("lifetime", cfg.lifetime).
 		Msg("Server up and running.")
 
-	return ServerID(res.ID), nil
+	return pool.servers[id], nil
 }
 
 func (pool *Pool) RemoveServer(ctx context.Context, id ServerID) error {
@@ -206,9 +220,6 @@ loop:
 		}
 	}
 
-	// TODO HTTP(TLS via reverse_proxy Caddy)
-	// TODO discord bot
-
 	// The context being already cancelled, we need a "new" one to allow Docker
 	// to do its stuff.
 	return pool.close(context.WithoutCancel(ctx))
@@ -243,7 +254,10 @@ func (pool *Pool) close(ctx context.Context) error {
 }
 
 func (pool *Pool) removeStoppedServers(ctx context.Context) error {
-	var errs []error
+	var (
+		errs []error
+		now  = time.Now()
+	)
 
 	for _, v := range pool.servers {
 		ok, err := pool.IsServerRunning(ctx, v.id)
@@ -255,6 +269,14 @@ func (pool *Pool) removeStoppedServers(ctx context.Context) error {
 			errs = append(errs, fmt.Errorf("unable to fetch server status: %w", err))
 			continue
 		} else if ok {
+			continue
+		}
+
+		if now.Before(v.startedAt.Add(1 * time.Minute)) {
+			log.Debug().
+				Str("id", v.id.String()).
+				Time("startedAt", v.startedAt).
+				Msg("server created but maybe not started yet, skipping removal")
 			continue
 		}
 

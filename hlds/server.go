@@ -1,9 +1,12 @@
 package hlds
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -96,9 +99,11 @@ type ServerConfig struct {
 	cvars      CVars    // ends up in instance.cfg called by server.cfg
 }
 
-type server struct {
+type Server struct {
 	id        ServerID
+	cfg       ServerConfig
 	name      string
+	hostIP    net.IP
 	port      uint16
 	startedAt time.Time
 	expiresAt time.Time
@@ -107,7 +112,19 @@ type server struct {
 	addonsDir string
 }
 
-func (s *server) Close() error {
+func (s Server) Host() string {
+	return net.JoinHostPort(s.hostIP.String(), strconv.Itoa(int(s.port)))
+}
+
+func (s Server) CVar(key string) string {
+	return s.cfg.cvars[key]
+}
+
+func (s Server) ExpiresAt() time.Time {
+	return s.expiresAt
+}
+
+func (s *Server) Close() error {
 	var errs = make([]error, 0, len(s.tempFiles))
 
 	for _, path := range s.tempFiles {
@@ -127,6 +144,7 @@ func (s *server) Close() error {
 	return errors.Join(errs...)
 }
 
+// Server sv_password and rcon_password wil be automatically generated.
 func NewServerConfig( // see type ServerConfig
 	lifetime time.Duration,
 	valveAddonDirPath string,
@@ -148,6 +166,9 @@ func NewServerConfig( // see type ServerConfig
 		return zero, errors.New("server lifetime must be within ]1m;24h]")
 	}
 	cvars["mp_timeleft"] = strconv.Itoa(int(lifetime.Seconds()))
+	cvars["rcon_password"] = generatePassword(32)
+	cvars["sv_password"] = generatePassword(8)
+	cvars["hostname"] = fmt.Sprintf("HLDSBot %s playtest", mapCycle[0])
 
 	absValveAddonDirPath, err := resolveAddonDirPath(valveAddonDirPath)
 	if err != nil {
@@ -280,4 +301,17 @@ func resolveAddonDirPath(path string) (string, error) {
 	}
 
 	return abs, nil
+}
+
+func generatePassword(size int) string {
+	if size < 2 {
+		panic(fmt.Errorf("requested password length is too short"))
+	}
+
+	var buf = make([]byte, size/2)
+	if _, err := rand.Read(buf); err != nil {
+		panic(err)
+	}
+
+	return hex.EncodeToString(buf)
 }
