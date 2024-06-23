@@ -1,0 +1,17 @@
+{
+	admin off
+	skip_install_trust
+}
+
+{$HOSTNAME} {
+	log
+
+	handle /connect {
+		redir "steam://connect/{http.request.uri.query.host}/{http.request.uri.query.password}"
+	}
+
+    handle_path /fastdl {
+        root * /var/tmp/hlds
+        file_server
+    }
+}

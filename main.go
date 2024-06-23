@@ -66,8 +66,6 @@ func dispatch(ctx context.Context, pool *hlds.Pool, bot *bot.Bot) {
 	wrap(ctx, cancel, pool.Run, &wg)
 	wrap(ctx, cancel, bot.Run, &wg)
 
-	// TODO HTTP(TLS via reverse_proxy Caddy)
-
 	<-ctx.Done()
 
 	log.Info().Err(ctx.Err()).Msg("Shutting down.")
