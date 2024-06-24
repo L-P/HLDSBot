@@ -125,20 +125,57 @@ func (ma MapArchive) MapName() string {
 func (ma MapArchive) Extract(dstBaseDir string) (int64, error) {
 	log.Info().Str("dst", dstBaseDir).Msg("Extracting archive to disk.")
 
-	var total int64
+	var (
+		total          int64
+		extractedNames = make([]string, 0, len(ma.mapping))
+		mapName        string
+	)
 
 	for srcName, dstName := range ma.mapping {
 		written, err := ma.extractFile(srcName, filepath.Join(dstBaseDir, dstName))
 		total += written
+
+		extractedNames = append(extractedNames, dstName)
+		if filepath.Ext(dstName) == ".bsp" {
+			mapName = strings.TrimSuffix(dstName, ".bsp")
+		}
 
 		if err != nil {
 			return total, fmt.Errorf("unable to extract from source '%s' to destination '%s': %w", srcName, dstName, err)
 		}
 	}
 
+	resPath := filepath.Join(dstBaseDir, mapName+".res")
+	if err := writeRESFile(resPath, extractedNames); err != nil {
+		log.Error().Err(err).Str("path", resPath).Msg("unable to write RES file")
+	}
+
 	log.Info().Str("dst", dstBaseDir).Int64("uncompressed", total).Msg("Archive extracted.")
 
 	return total, nil
+}
+
+func writeRESFile(path string, names []string) error {
+	log.Debug().Str("path", path).Strs("names", names).Msg("writing RES file")
+
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY, 0o644)
+	if err != nil {
+		return fmt.Errorf("unable to open res file for writing: %w", err)
+	}
+
+	for _, v := range names {
+		if filepath.Ext(v) == ".bsp" {
+			continue
+		}
+
+		fmt.Fprintln(f, v)
+	}
+
+	if err := f.Close(); err != nil {
+		return fmt.Errorf("unable to finish writing to RES file: %w", err)
+	}
+
+	return nil
 }
 
 func (ma MapArchive) extractFile(srcName, dstPath string) (int64, error) {
@@ -336,7 +373,7 @@ func isMappingDestValid(dst string) bool {
 	switch {
 	case dir == "." && ext == ".wad",
 		dir == "gfx/env" && ext == ".tga",
-		dir == "maps" && (ext == ".bsp" || ext == ".res" || ext == ".cfg"),
+		dir == "maps" && (ext == ".bsp" || ext == ".cfg"), // ignore .res, we generate our own
 		dir == "overviews" && (ext == ".tga" || ext == ".bmp" || ext == ".txt"),
 		archivePathHasPrefix(dst, "sprites") && ext == ".spr",
 		archivePathHasPrefix(dst, "sound") && ext == ".wav",
