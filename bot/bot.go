@@ -117,12 +117,34 @@ func (bot *Bot) registerCommands() error {
 			return
 		}
 
+		logInteraction(i)
 		if h, ok := handlers[i.ApplicationCommandData().Name]; ok {
 			h(s, i)
 		}
 	})
 
 	return errors.Join(errs...)
+}
+
+func logInteraction(i *discordgo.InteractionCreate) {
+	var user discordgo.User
+	if i.User != nil {
+		user = *i.User
+	} else if i.Member != nil && i.Member.User != nil {
+		user = *i.Member.User
+	}
+
+	log.Info().
+		Interface("interaction", i).
+		Str("GuildID", i.GuildID).
+		Str("ChannelID", i.ChannelID).
+		Str("UserID", user.ID).
+		Str("Username", user.Username).
+		Str("Discriminator", user.Discriminator).
+		Str("GlobalName", user.GlobalName).
+		Bool("Bot", user.Bot).
+		Bool("System", user.Bot).
+		Msg("interaction received")
 }
 
 func getOption(i *discordgo.InteractionCreate, name string) (*discordgo.ApplicationCommandInteractionDataOption, bool) {
