@@ -2,6 +2,7 @@ package hlds
 
 import (
 	"archive/zip"
+	"bytes"
 	"errors"
 	"fmt"
 	"io"
@@ -25,16 +26,57 @@ type MapArchive struct {
 	mapping  map[string]string // path in archive => path when extracting
 }
 
+type fsType int
+
+const (
+	fsTypeInvalid = iota
+	fsTypeZIP
+	fsType7z
+	fsTypeRAR
+)
+
+// Will return fsTypeInvalid with no error if the format is unknown.
+func detectArchiveType(path string) (fsType, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return fsTypeInvalid, fmt.Errorf("unable to open archive: %w", err)
+	}
+	defer f.Close()
+
+	var buf = make([]byte, 7)
+	if _, err := f.Read(buf); err != nil {
+		return fsTypeInvalid, fmt.Errorf("unable to read file header: %w", err)
+	}
+
+	switch {
+	case bytes.Equal(buf[:6], []byte{0x37, 0x7a, 0xbc, 0xaf, 0x27, 0x1c}):
+		return fsType7z, nil
+	case bytes.Equal(buf[:4], []byte{0x50, 0x4b, 0x03, 0x04}):
+		return fsTypeZIP, nil
+	case bytes.Equal(buf[:7], []byte{0x52, 0x61, 0x72, 0x21, 0x1a, 0x07, 0x00}):
+		return fsTypeRAR, nil
+	}
+
+	log.Debug().Hex("header", buf).Msg("unable to find correct file header")
+
+	return fsTypeInvalid, nil
+}
+
 func archiveFSFactory(path string) (fs.FS, func() error, error) {
-	switch filepath.Ext(path) {
-	case ".zip":
+	typ, err := detectArchiveType(path)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	switch typ {
+	case fsTypeZIP:
 		zip, err := zip.OpenReader(path)
 		if err == nil {
 			return zip, zip.Close, nil
 		}
 
 		return nil, nil, err
-	case ".7z":
+	case fsType7z:
 		szip, err := sevenzip.OpenReader(path)
 		if err == nil {
 			return szip, szip.Close, nil

@@ -202,6 +202,8 @@ func errorResponse(s *discordgo.Session, i *discordgo.InteractionCreate, err err
 		var err2 *hlds.AtCapacityError
 		errors.As(err, &err2)
 		msg = fmt.Sprintf("All servers are busy, next one will be freed <t:%d:R>.", err)
+	case errors.Is(err, twhl.ErrWrongCategory):
+		msg = "Vault item is not a _Half-Life: Deathmatch_ map."
 	}
 
 	if _, err := s.FollowupMessageCreate(i.Interaction, true, &discordgo.WebhookParams{

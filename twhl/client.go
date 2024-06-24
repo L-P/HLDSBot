@@ -14,6 +14,8 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
+var ErrWrongCategory = errors.New("only downloading HLDM maps is supported")
+
 const (
 	apiBaseURL = "https://twhl.info/api"
 
@@ -70,7 +72,7 @@ func (client *Client) DownloadVaultItem(ctx context.Context, id int) (string, er
 	if item.EngineID != EngineIDGoldSrc ||
 		item.GameID != GameIDHLDM ||
 		item.TypeID != ItemTypeIDMap {
-		return "", errors.New("only downloading HLDM maps is supported")
+		return "", ErrWrongCategory
 	}
 
 	downloadURL := fmt.Sprintf(downloadURLTemplate, id)
