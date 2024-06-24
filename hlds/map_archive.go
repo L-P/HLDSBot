@@ -5,28 +5,56 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
 
+	"github.com/bodgit/sevenzip"
 	"github.com/rs/zerolog/log"
 )
 
+var MissingBSPErr = errors.New("no .bsp file in archive")
+var MultipleBSPErr = errors.New("multiple .bsp files found in archive")
+var InvalidPathErr = errors.New("archive contains paths with non-unicode characters")
+var UnknownArchiveErr = errors.New("archive is not in a format we can handle")
+
 type MapArchive struct {
-	zip     *zip.ReadCloser
-	mapping map[string]string // path in zip => path when extracting
+	fs       fs.FS
+	fsCloser func() error
+	mapping  map[string]string // path in archive => path when extracting
+}
+
+func archiveFSFactory(path string) (fs.FS, func() error, error) {
+	switch filepath.Ext(path) {
+	case ".zip":
+		zip, err := zip.OpenReader(path)
+		if err == nil {
+			return zip, zip.Close, nil
+		}
+
+		return nil, nil, err
+	case ".7z":
+		szip, err := sevenzip.OpenReader(path)
+		if err == nil {
+			return szip, szip.Close, nil
+		}
+		return nil, nil, err
+	}
+
+	return nil, nil, UnknownArchiveErr
 }
 
 // Please don't upload zip bombs to TWHL.
 func ReadMapArchiveFromFile(path string) (*MapArchive, error) {
-	zip, err := zip.OpenReader(path)
+	fs, closer, err := archiveFSFactory(path)
 	if err != nil {
 		return nil, fmt.Errorf("unable to open map archive for reading: %w", err)
 	}
 
-	mapping, err := remapZIP(zip)
+	mapping, err := remapArchive(fs)
 	if err != nil {
-		return nil, fmt.Errorf("unable to remap zip paths: %w", err)
+		return nil, fmt.Errorf("unable to remap archive paths: %w", err)
 	}
 
 	mapping, err = sanitizeMapping(mapping)
@@ -36,8 +64,9 @@ func ReadMapArchiveFromFile(path string) (*MapArchive, error) {
 	log.Debug().Interface("mapping", mapping).Msg("")
 
 	return &MapArchive{
-		zip:     zip,
-		mapping: mapping,
+		fs:       fs,
+		fsCloser: closer,
+		mapping:  mapping,
 	}, nil
 }
 
@@ -71,9 +100,9 @@ func (ma MapArchive) Extract(dstBaseDir string) (int64, error) {
 }
 
 func (ma MapArchive) extractFile(srcName, dstPath string) (int64, error) {
-	srcFile, err := ma.zip.Open(srcName)
+	srcFile, err := ma.fs.Open(srcName)
 	if err != nil {
-		return 0, fmt.Errorf("unable to open source file '%s' in zip: %w", srcFile, err)
+		return 0, fmt.Errorf("unable to open source file '%s' in archive: %w", srcFile, err)
 	}
 	defer srcFile.Close()
 
@@ -102,23 +131,37 @@ func (ma MapArchive) extractFile(srcName, dstPath string) (int64, error) {
 }
 
 func (ma *MapArchive) Close() error {
-	return ma.zip.Close()
+	return ma.fsCloser()
 }
 
-// Get a usable tree out of random zips. ie. put bsp in maps/ even if they're
+// Get a usable tree out of random archives. ie. put bsp in maps/ even if they're
 // at the root of the archive.
-func remapZIP(zip *zip.ReadCloser) (map[string]string, error) {
-	var files = make([]string, len(zip.File))
-	for i := range zip.File {
-		if isPathGarbage(zip.File[i].Name) {
-			log.Debug().Str("path", zip.File[i].Name).Msg("skipping garbage")
-			continue
+func remapArchive(archive fs.FS) (map[string]string, error) {
+	var files []string
+
+	if err := fs.WalkDir(archive, ".", func(path string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			return fmt.Errorf("error sent to WalkDir callback: %w", err)
 		}
 
-		files[i] = filepath.Clean(zip.File[i].Name)
+		if isPathGarbage(path) {
+			log.Debug().Str("path", path).Msg("skipping garbage")
+			return nil
+		}
+
+		files = append(files, filepath.Clean(path))
+		return nil
+	}); err != nil {
+		if errors.Is(err, fs.ErrInvalid) {
+			return nil, InvalidPathErr
+		}
+
+		return nil, fmt.Errorf("unable to walk through archive: %w", err)
 	}
 
-	return remapArchive(files)
+	log.Debug().Strs("files", files).Msg("")
+
+	return generateMapping(files)
 }
 
 func isPathGarbage(path string) bool {
@@ -131,43 +174,38 @@ func isPathGarbage(path string) bool {
 	return false
 }
 
-func remapArchive(files []string) (map[string]string, error) {
+func generateMapping(files []string) (map[string]string, error) {
+	bspSrcPath, err := findBSPPath(files)
+	if err != nil {
+		return nil, fmt.Errorf("unable to find BSP: %w", err)
+	}
+
 	var (
-		bspSrcPath string
-		mapping    = make(map[string]string, 1)
+		mapping = make(map[string]string, 1)
+		// Consider the dir where we found the BSP to be the maps dir and build
+		// the hierarchy from there (or rather: from its parent).
+		mapsDir = filepath.Dir(bspSrcPath)
+		baseDir = filepath.Dir(mapsDir)
 	)
 
-	for _, path := range files {
-		if strings.Contains(path, "..") {
-			return nil, fmt.Errorf("archive contains invalid paths: %s", path)
-		}
-
-		if strings.HasSuffix(path, ".bsp") {
-			if bspSrcPath != "" {
-				return nil, fmt.Errorf("multiple .bsp files in archive, not deciding")
-			}
-			bspSrcPath = path
-		}
-	}
-	mapping[bspSrcPath] = filepath.Join("maps", bspSrcPath)
-
 	// Lone BSP at the root of the archive, no other file is expected to be
-	// usable or in the right path in this ZIP. Bail.
+	// usable or in the right path in this archive. Bail.
 	if !strings.ContainsRune(bspSrcPath, '/') {
 		log.Info().Str("bsp", bspSrcPath).Msg("Found BSP at the archive's root.")
+		mapping[bspSrcPath] = filepath.Join("maps", bspSrcPath)
 		return mapping, nil
 	}
 
-	// What? Assume a lone .bsp lost in the zip and bail.
-	mapsDir := filepath.Dir(bspSrcPath)
+	// Someone caring put a lone BSP and maybe a readme in a subdirectory to
+	// avoid zip bombing your cwd. Assume a lone BSP and bail.
 	if filepath.Base(mapsDir) != "maps" {
+		mapping[bspSrcPath] = filepath.Join("maps", filepath.Base(bspSrcPath))
 		log.Warn().Str("bsp", bspSrcPath).Msg("Found BSP in a weird path.")
 		return mapping, nil
 	}
 
-	baseDir := filepath.Dir(mapsDir)
 	log.Debug().Str("bsp", bspSrcPath).Str("base", baseDir).Msg("Found a proper hierarchy.")
-
+	mapping[bspSrcPath] = filepath.Join("maps", bspSrcPath)
 	return remapArchiveFromBaseDir(files, baseDir)
 }
 
@@ -204,6 +242,7 @@ func archivePathTrimPrefix(path, prefix string) string {
 	return strings.TrimPrefix(path, prefix)
 }
 
+// Prefix as in "does this path starts with the given _path_", not _string_.
 func archivePathHasPrefix(path, prefix string) bool {
 	if prefix == "" {
 		return true
@@ -221,8 +260,10 @@ func archivePathHasPrefix(path, prefix string) bool {
 }
 
 func sanitizeMapping(mapping map[string]string) (map[string]string, error) {
-	var ret = make(map[string]string, len(mapping))
-	var foundBSP bool
+	var (
+		ret      = make(map[string]string, len(mapping))
+		foundBSP bool
+	)
 
 	for src, dst := range mapping {
 		if !isMappingDestValid(dst) {
@@ -235,8 +276,10 @@ func sanitizeMapping(mapping map[string]string) (map[string]string, error) {
 		foundBSP = foundBSP || filepath.Ext(dst) == ".bsp"
 	}
 
+	// Since we're removing paths, re-check if we have a BSP, just in case we
+	// did something stupid.
 	if !foundBSP {
-		return nil, errors.New("found no BSP after sanitizing")
+		return nil, MissingBSPErr
 	}
 
 	return ret, nil
@@ -252,12 +295,35 @@ func isMappingDestValid(dst string) bool {
 	case dir == "." && ext == ".wad",
 		dir == "gfx/env" && ext == ".tga",
 		dir == "maps" && (ext == ".bsp" || ext == ".res" || ext == ".cfg"),
-		dir == "sprites" && ext == ".spr",
-		dir == "sound" && ext == ".wav",
-		dir == "models" && ext == ".mdl",
-		dir == "overviews" && (ext == ".tga" || ext == ".bmp" || ext == ".txt"):
+		dir == "overviews" && (ext == ".tga" || ext == ".bmp" || ext == ".txt"),
+		archivePathHasPrefix(dst, "sprites") && ext == ".spr",
+		archivePathHasPrefix(dst, "sound") && ext == ".wav",
+		archivePathHasPrefix(dst, "models") && ext == ".mdl":
 		return true
 	}
 
 	return false
+}
+
+func findBSPPath(paths []string) (string, error) {
+	var ret string
+
+	for _, path := range paths {
+		if strings.Contains(path, "..") {
+			return "", fmt.Errorf("archive contains invalid paths: %s", path)
+		}
+
+		if strings.HasSuffix(path, ".bsp") {
+			if ret != "" {
+				return "", MultipleBSPErr
+			}
+			ret = path
+		}
+	}
+
+	if ret == "" {
+		return "", MissingBSPErr
+	}
+
+	return ret, nil
 }

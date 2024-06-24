@@ -9,7 +9,7 @@ import (
 
 func TestPortAlloc(t *testing.T) {
 	var min uint16 = 27015
-	pool, err := hlds.NewPool(nil, 2, 27015)
+	pool, err := hlds.NewPool(nil, 2, 27015, "https://localhost")
 	require.NoError(t, err)
 
 	port, err := pool.AllocPort()
