@@ -185,6 +185,13 @@ func (bot *Bot) commandHandlerHLDS(s *discordgo.Session, i *discordgo.Interactio
 	if err := bot.hldsResponse(s, i, server); err != nil {
 		log.Error().Err(err).Msg("unable to respond to command")
 	}
+
+	if _, err := s.FollowupMessageCreate(i.Interaction, true, &discordgo.WebhookParams{
+		Content: fmt.Sprintf("rcon_password: `%s`", server.CVar("rcon_password")),
+		Flags:   discordgo.MessageFlagsEphemeral,
+	}); err != nil {
+		log.Error().Err(err).Msg("unable to echo rcon_password")
+	}
 }
 
 func errorResponse(s *discordgo.Session, i *discordgo.InteractionCreate, err error, fallback string) {
