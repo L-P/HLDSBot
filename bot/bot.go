@@ -188,7 +188,10 @@ func (bot *Bot) commandHandlerHLDS(s *discordgo.Session, i *discordgo.Interactio
 }
 
 func errorResponse(s *discordgo.Session, i *discordgo.InteractionCreate, err error, fallback string) {
-	var msg = fallback
+	var (
+		msg    = fallback
+		errCap *hlds.AtCapacityError
+	)
 	switch {
 	case errors.Is(err, hlds.MissingBSPErr):
 		msg = "No .bsp file found in archive."
@@ -198,10 +201,8 @@ func errorResponse(s *discordgo.Session, i *discordgo.InteractionCreate, err err
 		msg = "File or directory name with non-unicode characters found in archive."
 	case errors.Is(err, hlds.UnknownArchiveErr):
 		msg = "Unsupported archive format, only ZIP and 7z are supported."
-	case errors.Is(err, &hlds.AtCapacityError{}):
-		var err2 *hlds.AtCapacityError
-		errors.As(err, &err2)
-		msg = fmt.Sprintf("All servers are busy, next one will be freed <t:%d:R>.", err)
+	case errors.As(err, &errCap):
+		msg = fmt.Sprintf("All servers are busy, one will be freed <t:%d:R>.", err)
 	case errors.Is(err, twhl.ErrWrongCategory):
 		msg = "Vault item is not a _Half-Life: Deathmatch_ map."
 	}
