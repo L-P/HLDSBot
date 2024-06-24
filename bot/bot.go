@@ -209,7 +209,7 @@ func (bot *Bot) commandHandlerHLDS(s *discordgo.Session, i *discordgo.Interactio
 	}
 
 	if _, err := s.FollowupMessageCreate(i.Interaction, true, &discordgo.WebhookParams{
-		Content: fmt.Sprintf("rcon_password: `%s`", server.CVar("rcon_password")),
+		Content: fmt.Sprintf("```rcon_password \"%s\"```", server.CVar("rcon_password")),
 		Flags:   discordgo.MessageFlagsEphemeral,
 	}); err != nil {
 		log.Error().Err(err).Msg("unable to echo rcon_password")
