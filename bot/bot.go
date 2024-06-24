@@ -135,7 +135,7 @@ func logInteraction(i *discordgo.InteractionCreate) {
 	}
 
 	log.Info().
-		Interface("interaction", i).
+		Interface("command", i.ApplicationCommandData()).
 		Str("GuildID", i.GuildID).
 		Str("ChannelID", i.ChannelID).
 		Str("UserID", user.ID).
