@@ -17,6 +17,14 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
+type AtCapacityError struct {
+	NextExpiry time.Time
+}
+
+func (e *AtCapacityError) Error() string {
+	return fmt.Sprintf("server pool reached capacity, next expiry at %s", e.NextExpiry)
+}
+
 type Pool struct {
 	docker     *docker.Client
 	maxServers int
@@ -73,10 +81,7 @@ func makePorts(minPort uint16, maxServers int) []portAlloc {
 	return ret
 }
 
-func (pool *Pool) AddServer(ctx context.Context, cfg ServerConfig) (
-	Server,
-	error,
-) {
+func (pool *Pool) AddServer(ctx context.Context, cfg ServerConfig) (Server, error) {
 	var zero Server
 
 	// Let this be the first thing we do to ensure we have space to allocate a
@@ -196,7 +201,11 @@ func (pool *Pool) AllocPort() (uint16, error) {
 		return v.port, nil
 	}
 
-	return 0, errors.New("all ports are already allocated")
+	if nextExpiry, ok := pool.getNextServerExpiry(); ok {
+		return 0, &AtCapacityError{NextExpiry: nextExpiry}
+	}
+
+	return 0, errors.New("all ports allocated but no next server expiry")
 }
 
 func (pool *Pool) FreePort(port uint16) {
@@ -329,4 +338,19 @@ func isDockerErrNotFound(err error) bool {
 
 		err = errors.Unwrap(err)
 	}
+}
+
+func (pool *Pool) getNextServerExpiry() (time.Time, bool) {
+	var min time.Time
+	for _, v := range pool.servers {
+		if min.IsZero() || v.expiresAt.Before(min) {
+			min = v.expiresAt
+		}
+	}
+
+	if min.IsZero() {
+		return time.Time{}, false
+	}
+
+	return min, true
 }

@@ -156,7 +156,7 @@ func (bot *Bot) commandHandlerHLDS(s *discordgo.Session, i *discordgo.Interactio
 	addonsDir, mapName, err := twhl.FetchAndExtractVaultMap(bot.ctx, id)
 	if err != nil {
 		log.Error().Err(err).Msg("unable to fetch and extract vault item")
-		errorResponse(s, i, "Could not fetch TWHL Vault item.")
+		errorResponse(s, i, err, "Could not fetch TWHL Vault item.")
 		return
 	}
 
@@ -171,14 +171,14 @@ func (bot *Bot) commandHandlerHLDS(s *discordgo.Session, i *discordgo.Interactio
 	)
 	if err != nil {
 		log.Error().Err(err).Msg("unable to create server config")
-		errorResponse(s, i, "Could not create server.")
+		errorResponse(s, i, err, "Could not create server.")
 		return
 	}
 
 	server, err := bot.pool.AddServer(bot.ctx, cfg)
 	if err != nil {
 		log.Error().Err(err).Msg("unable to start server")
-		errorResponse(s, i, "Could not start server.")
+		errorResponse(s, i, err, "Could not start server.")
 		return
 	}
 
@@ -187,7 +187,23 @@ func (bot *Bot) commandHandlerHLDS(s *discordgo.Session, i *discordgo.Interactio
 	}
 }
 
-func errorResponse(s *discordgo.Session, i *discordgo.InteractionCreate, msg string) {
+func errorResponse(s *discordgo.Session, i *discordgo.InteractionCreate, err error, fallback string) {
+	var msg = fallback
+	switch {
+	case errors.Is(err, hlds.MissingBSPErr):
+		msg = "No .bsp file found in archive."
+	case errors.Is(err, hlds.MultipleBSPErr):
+		msg = "Multiple .bsp files found in archive, there can be only one."
+	case errors.Is(err, hlds.InvalidPathErr):
+		msg = "File or directory name with non-unicode characters found in archive."
+	case errors.Is(err, hlds.UnknownArchiveErr):
+		msg = "Unsupported archive format, only ZIP and 7z are supported."
+	case errors.Is(err, &hlds.AtCapacityError{}):
+		var err2 *hlds.AtCapacityError
+		errors.As(err, &err2)
+		msg = fmt.Sprintf("All servers are busy, next one will be freed <t:%d:R>.", err)
+	}
+
 	if _, err := s.FollowupMessageCreate(i.Interaction, true, &discordgo.WebhookParams{
 		Content: msg,
 		Flags:   discordgo.MessageFlagsEphemeral,
