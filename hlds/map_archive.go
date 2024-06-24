@@ -12,6 +12,9 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
+var MissingBSPErr = errors.New("no .bsp file in archive")
+var MultipleBSPErr = errors.New("multiple .bsp files found in archive")
+
 type MapArchive struct {
 	zip     *zip.ReadCloser
 	mapping map[string]string // path in zip => path when extracting
@@ -132,42 +135,37 @@ func isPathGarbage(path string) bool {
 }
 
 func remapArchive(files []string) (map[string]string, error) {
-	var (
-		bspSrcPath string
-		mapping    = make(map[string]string, 1)
-	)
-
-	for _, path := range files {
-		if strings.Contains(path, "..") {
-			return nil, fmt.Errorf("archive contains invalid paths: %s", path)
-		}
-
-		if strings.HasSuffix(path, ".bsp") {
-			if bspSrcPath != "" {
-				return nil, fmt.Errorf("multiple .bsp files in archive, not deciding")
-			}
-			bspSrcPath = path
-		}
+	bspSrcPath, err := findBSPPath(files)
+	if err != nil {
+		return nil, fmt.Errorf("unable to find BSP: %w", err)
 	}
-	mapping[bspSrcPath] = filepath.Join("maps", bspSrcPath)
+
+	var (
+		mapping = make(map[string]string, 1)
+		// Consider the dir where we found the BSP to be the maps dir and build
+		// the hierarchy from there (or rather: from its parent).
+		mapsDir = filepath.Dir(bspSrcPath)
+		baseDir = filepath.Dir(mapsDir)
+	)
 
 	// Lone BSP at the root of the archive, no other file is expected to be
 	// usable or in the right path in this ZIP. Bail.
 	if !strings.ContainsRune(bspSrcPath, '/') {
 		log.Info().Str("bsp", bspSrcPath).Msg("Found BSP at the archive's root.")
+		mapping[bspSrcPath] = filepath.Join("maps", bspSrcPath)
 		return mapping, nil
 	}
 
-	// What? Assume a lone .bsp lost in the zip and bail.
-	mapsDir := filepath.Dir(bspSrcPath)
+	// Someone caring put a lone BSP and maybe a readme in a subdirectory to
+	// avoid zip bombing your cwd. Assume a lone BSP and bail.
 	if filepath.Base(mapsDir) != "maps" {
+		mapping[bspSrcPath] = filepath.Join("maps", filepath.Base(bspSrcPath))
 		log.Warn().Str("bsp", bspSrcPath).Msg("Found BSP in a weird path.")
 		return mapping, nil
 	}
 
-	baseDir := filepath.Dir(mapsDir)
 	log.Debug().Str("bsp", bspSrcPath).Str("base", baseDir).Msg("Found a proper hierarchy.")
-
+	mapping[bspSrcPath] = filepath.Join("maps", bspSrcPath)
 	return remapArchiveFromBaseDir(files, baseDir)
 }
 
@@ -236,7 +234,7 @@ func sanitizeMapping(mapping map[string]string) (map[string]string, error) {
 	}
 
 	if !foundBSP {
-		return nil, errors.New("found no BSP after sanitizing")
+		return nil, MissingBSPErr
 	}
 
 	return ret, nil
@@ -252,12 +250,35 @@ func isMappingDestValid(dst string) bool {
 	case dir == "." && ext == ".wad",
 		dir == "gfx/env" && ext == ".tga",
 		dir == "maps" && (ext == ".bsp" || ext == ".res" || ext == ".cfg"),
-		dir == "sprites" && ext == ".spr",
-		dir == "sound" && ext == ".wav",
-		dir == "models" && ext == ".mdl",
-		dir == "overviews" && (ext == ".tga" || ext == ".bmp" || ext == ".txt"):
+		dir == "overviews" && (ext == ".tga" || ext == ".bmp" || ext == ".txt"),
+		archivePathHasPrefix(dst, "sprites") && ext == ".spr",
+		archivePathHasPrefix(dst, "sound") && ext == ".wav",
+		archivePathHasPrefix(dst, "models") && ext == ".mdl":
 		return true
 	}
 
 	return false
+}
+
+func findBSPPath(paths []string) (string, error) {
+	var ret string
+
+	for _, path := range paths {
+		if strings.Contains(path, "..") {
+			return "", fmt.Errorf("archive contains invalid paths: %s", path)
+		}
+
+		if strings.HasSuffix(path, ".bsp") {
+			if ret != "" {
+				return "", MultipleBSPErr
+			}
+			ret = path
+		}
+	}
+
+	if ret == "" {
+		return "", MissingBSPErr
+	}
+
+	return ret, nil
 }
